@@ -1,0 +1,12 @@
+dataset: imdb
+split: test
+score_type: target_probability
+mask_operator: aml_hard_deletion_eval_protocol
+dependency_parser: spacy
+spacy_model: en_core_web_sm
+interaction_strength:
+  primary: mean_topk_abs
+  topk: 3
+buckets:
+  method: quantile
+budgets: [1, 5, 10, 20, 50]
