@@ -18,6 +18,7 @@ from models.train_models_utils import (load_interpreter_model, init_trainable_em
                                        load_trainable_embeddings,
                                        get_warmup_steps_and_total_training_steps, get_explained_ref_token_name,
                                        run_trainer)
+from utils.result_summary import utc_now_iso, write_summary_from_results
 from utils.utils_functions import is_model_encoder_only
 
 
@@ -47,6 +48,7 @@ class FineTune:
     def run(self):
 
         begin = time.time()
+        started_at = utc_now_iso()
         ExpArgs.scheduler_type = ExpArgs.fine_tune_scheduler_type
 
         interpreter_model = load_interpreter_model()
@@ -109,4 +111,6 @@ class FineTune:
 
         end = time.time()
 
+        ended_at = utc_now_iso()
+        write_summary_from_results(fine_tuned_results_path, self.experiment_name, started_at, ended_at)
         save_running_time(end, begin, self.experiment_name, file_type = "FineTune")

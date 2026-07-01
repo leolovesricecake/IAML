@@ -1,6 +1,8 @@
 import sys
+import tempfile
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
 
 
 EXPERIMENT_ROOT = Path(__file__).resolve().parents[1]
@@ -54,6 +56,51 @@ class AnalysisPrimitiveTests(unittest.TestCase):
 
         self.assertEqual(cliffs_delta(high, low), 1.0)
         self.assertGreater(standardized_mean_difference(high, low), 0.0)
+
+    def test_config_topk_is_used_when_cli_does_not_override(self):
+        from scripts.run_diagnostic import _resolve_interaction_topk
+
+        config = {"interaction_strength": {"topk": 5}}
+
+        self.assertEqual(_resolve_interaction_topk(SimpleNamespace(interaction_topk=None), config), 5)
+        self.assertEqual(_resolve_interaction_topk(SimpleNamespace(interaction_topk=3), config), 3)
+
+    def test_mock_diagnostic_writes_summary_and_aopc_curve_outputs(self):
+        from scripts.run_diagnostic import build_parser, run
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            args = build_parser().parse_args(
+                [
+                    "--adapter",
+                    "mock",
+                    "--max-samples",
+                    "2",
+                    "--disable-dependency",
+                    "--output-dir",
+                    tmpdir,
+                ]
+            )
+            run(args)
+            output_dir = Path(tmpdir)
+
+            self.assertTrue((output_dir / "summary.json").is_file())
+            self.assertTrue((output_dir / "per_budget_metrics.csv").is_file())
+            self.assertTrue((output_dir / "aopc_curve.csv").is_file())
+
+            aopc_header = (output_dir / "aopc_curve.csv").read_text(encoding="utf-8").splitlines()[0]
+            per_budget_header = (output_dir / "per_budget_metrics.csv").read_text(encoding="utf-8").splitlines()[0]
+
+            self.assertIn("budget", aopc_header)
+            self.assertIn("comprehensiveness_mean", aopc_header)
+            self.assertIn("sufficiency_error_mean", aopc_header)
+            self.assertIn("log_odds_mean", aopc_header)
+            self.assertIn("id", per_budget_header)
+            self.assertIn("log_odds", per_budget_header)
+
+    def test_summary_writer_handles_non_git_repositories(self):
+        from src.summary_utils import git_commit
+
+        self.assertIsInstance(git_commit(Path("Z:/definitely/not/a/git/repo")), str)
 
 
 if __name__ == "__main__":

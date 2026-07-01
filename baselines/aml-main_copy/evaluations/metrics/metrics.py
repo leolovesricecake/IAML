@@ -50,7 +50,7 @@ class Metrics:
         else:
             raise ValueError("unsupported ExpArgs.eval_metric selected - run_perturbation_test")
         # results_mean = torch.tensor(results).mean()
-        results_item = self.transform_results(metric_res)
+        results_item = self.transform_results(metric_res, results_steps)
         self.save_results(results_item)
         return metric_res, results_item
 
@@ -71,13 +71,13 @@ class Metrics:
             with open(self.output_path, 'a', newline = '', encoding = 'utf-8-sig') as f:
                 results_item.to_csv(f, header = f.tell() == 0, index = False)
 
-    def transform_results(self, metric_result):
+    def transform_results(self, metric_result, results_steps):
         res = MetricResults(item_index = self.item_index, task = ExpArgs.task.name, evaluation_metric = ExpArgs.eval_metric,
                             explained_model_backbone = ExpArgs.explained_model_backbone,
                             interpreter_model_backbone = ExpArgs.interpreter_model_backbone,
                             metric_result = metric_result,
                             metric_result_str = "{:.6f}".format(metric_result),
-                            metric_steps_result = None, steps_k = self.pretu_steps,
+                            metric_steps_result = results_steps, steps_k = self.pretu_steps,
                             explained_model_predicted_class = self.data.explained_model_predicted_class.squeeze().item(),
                             step = self.step, epoch = self.epoch, token_evaluation_option = ExpArgs.eval_tokens)
         return pd.DataFrame([res])

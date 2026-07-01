@@ -11,7 +11,7 @@ EXPERIMENT_ROOT = Path(__file__).resolve().parents[1]
 if str(EXPERIMENT_ROOT) not in sys.path:
     sys.path.insert(0, str(EXPERIMENT_ROOT))
 
-from src.aml_adapter import MockAmlAdapter
+from src.aml_adapter import BaselineAmlAdapter, MockAmlAdapter
 from src.bucket_analysis import assign_quantile_buckets, compute_interaction_strengths, summarize_bucket_metrics
 from src.candidate_graph import build_candidate_edges, dependency_edges_from_spacy
 from src.casebook import build_casebook
@@ -21,6 +21,7 @@ from src.io_utils import ensure_dir, write_json, write_jsonl
 from src.model_adapter import ProbabilityScorer
 from src.plotting import write_binned_trend_csv
 from src.statistics import cliffs_delta, correlation_report, standardized_mean_difference
+from src.summary_utils import utc_now_iso, write_csv, write_diagnostic_outputs
 from src.tokenizer_alignment import align_text_to_tokens
 
 
@@ -112,19 +113,81 @@ def _run_dir(args, config):
     if args.output_dir:
         return ensure_dir(args.output_dir)
     run_id = datetime.now().strftime("%Y%m%d_%H%M%S")
-    return ensure_dir(EXPERIMENT_ROOT / "outputs" / "mock" / "mock_model" / "mock_checkpoint" / "hard_deletion" / run_id)
+    adapter_name = getattr(args, "adapter", "mock")
+    task = getattr(args, "task", config.get("dataset", "mock"))
+    checkpoint = Path(getattr(args, "interpreter_checkpoint", None) or "mock_checkpoint").name
+    explained = Path(getattr(args, "explained_model_name_or_path", None) or "mock_model").name
+    return ensure_dir(EXPERIMENT_ROOT / "outputs" / adapter_name / str(task) / explained / checkpoint / run_id)
+
+
+def _resolve_interaction_topk(args, config):
+    if args.interaction_topk is not None:
+        return args.interaction_topk
+    interaction_config = config.get("interaction_strength", {}) if isinstance(config, dict) else {}
+    return int(interaction_config.get("topk", 3))
+
+
+def _build_adapter_and_samples(args):
+    if args.adapter == "mock":
+        adapter = MockAmlAdapter()
+        return adapter, SimpleOffsetTokenizer(), _default_samples()[: args.max_samples]
+
+    adapter = BaselineAmlAdapter.from_checkpoint(
+        baseline_root=args.baseline_root,
+        task=args.task,
+        explained_model_backbone=args.explained_model_backbone,
+        interpreter_model_backbone=args.interpreter_model_backbone,
+        metric=args.metric,
+        interpreter_checkpoint=args.interpreter_checkpoint,
+        explained_model_name_or_path=args.explained_model_name_or_path,
+        interpreter_model_name_or_path=args.interpreter_model_name_or_path,
+        explained_tokenizer_name_or_path=args.explained_tokenizer_name_or_path,
+        interpreter_tokenizer_name_or_path=args.interpreter_tokenizer_name_or_path,
+        llm_adapter_path=args.llm_adapter_path,
+        local_files_only=args.local_files_only,
+        trust_remote_code=args.trust_remote_code,
+        max_samples=args.max_samples,
+    )
+    return adapter, adapter.alignment_tokenizer, list(adapter.iter_samples(max_samples=args.max_samples))
+
+
+def _metadata(args, config, topk, num_edges):
+    return {
+        "adapter": args.adapter,
+        "task": args.task,
+        "score_type": "target_probability",
+        "mask_operator": "aml_hard_deletion_eval_protocol",
+        "log_odds_operator": "aml_ref_token_replacement",
+        "dependency_parser": None if args.disable_dependency else f"spacy:{args.spacy_model}",
+        "word_attribution_aggregation": "max_subword_attribution",
+        "interaction_strength": {"primary": "mean_topk_abs", "topk": topk},
+        "explained_model_backbone": args.explained_model_backbone,
+        "interpreter_model_backbone": args.interpreter_model_backbone,
+        "metric": args.metric,
+        "interpreter_checkpoint": args.interpreter_checkpoint,
+        "explained_model_name_or_path": args.explained_model_name_or_path,
+        "interpreter_model_name_or_path": args.interpreter_model_name_or_path,
+        "explained_tokenizer_name_or_path": args.explained_tokenizer_name_or_path,
+        "interpreter_tokenizer_name_or_path": args.interpreter_tokenizer_name_or_path,
+        "llm_adapter_path": args.llm_adapter_path,
+        "local_files_only": args.local_files_only,
+        "trust_remote_code": args.trust_remote_code,
+        "num_edges": num_edges,
+        "config": config,
+    }
 
 
 def run(args):
+    started_at = utc_now_iso()
     config = _load_config(args.config)
     run_dir = _run_dir(args, config)
-    tokenizer = SimpleOffsetTokenizer()
-    adapter = MockAmlAdapter()
+    topk = _resolve_interaction_topk(args, config)
+    adapter, tokenizer, samples = _build_adapter_and_samples(args)
     nlp = _load_spacy(args.disable_dependency, args.spacy_model)
-    samples = _default_samples()[: args.max_samples]
 
     per_examples = []
     per_edges = []
+    per_budget_rows = []
     for sample in samples:
         alignment = align_text_to_tokens(tokenizer, sample["text"])
         if alignment.skipped:
@@ -137,16 +200,29 @@ def run(args):
         scorer = ProbabilityScorer(adapter, sample["text"], alignment.words)
         interaction_result = compute_interactions(candidate_edges, scorer)
         strengths = compute_interaction_strengths(
-            [edge.interaction_score for edge in interaction_result.edge_scores], topk=args.interaction_topk
+            [edge.interaction_score for edge in interaction_result.edge_scores], topk=topk
         )
-        word_indices = set(range(len(alignment.words)))
+        keep_scorer = ProbabilityScorer(adapter, sample["text"], alignment.words, mode="keep")
+        replace_scorer = ProbabilityScorer(adapter, sample["text"], alignment.words, mode="replace_ref")
         faithfulness = evaluate_faithfulness_from_scores(
             original_score=attribution.original_target_score,
             word_attributions=attribution.word_attributions,
             delete_scorer=lambda selected: scorer(frozenset(selected)),
-            keep_scorer=lambda selected: scorer(frozenset(word_indices - set(selected))),
+            keep_scorer=lambda selected: keep_scorer(frozenset(selected)),
+            replace_scorer=lambda selected: replace_scorer(frozenset(selected)),
             budgets=DEFAULT_BUDGETS,
         )
+        for budget_row in faithfulness["per_budget"]:
+            per_budget_rows.append(
+                {
+                    "id": sample["id"],
+                    "budget": budget_row["budget"],
+                    "selected_word_indices": " ".join(str(idx) for idx in budget_row["selected_word_indices"]),
+                    "comprehensiveness": budget_row["comprehensiveness"],
+                    "sufficiency_error": budget_row["sufficiency_error"],
+                    "log_odds": budget_row["log_odds"],
+                }
+            )
 
         edge_rows = []
         for edge_score in interaction_result.edge_scores:
@@ -177,6 +253,7 @@ def run(args):
                 "interaction_strengths": strengths,
                 "deletion_metrics": {"comprehensiveness_aopc": faithfulness["comprehensiveness_aopc"]},
                 "sufficiency_metrics": {"sufficiency_aopc": faithfulness["sufficiency_aopc"]},
+                "log_odds_metrics": {"log_odds_aopc": faithfulness["log_odds_aopc"]},
                 "comprehensiveness_metrics": {"per_budget": faithfulness["per_budget"]},
                 "faithfulness_error": faithfulness["faithfulness_error"],
             }
@@ -186,30 +263,47 @@ def run(args):
     buckets = assign_quantile_buckets([row["interaction_strength"] for row in valid_examples])
     for row, bucket in zip(valid_examples, buckets):
         row["bucket"] = bucket
+    bucket_by_id = {row["id"]: row.get("bucket") for row in valid_examples}
+    for row in per_budget_rows:
+        row["bucket"] = bucket_by_id.get(row["id"])
 
     write_jsonl(run_dir / "per_example.jsonl", per_examples)
     write_jsonl(run_dir / "per_edge.jsonl", per_edges)
-    write_json(run_dir / "metadata.json", {
-        "score_type": "target_probability",
-        "mask_operator": "aml_hard_deletion_eval_protocol",
-        "dependency_parser": None if args.disable_dependency else f"spacy:{args.spacy_model}",
-        "word_attribution_aggregation": "mock_or_configured_adapter_output",
-        "config": config,
-    })
+    write_csv(
+        run_dir / "per_budget_metrics.csv",
+        per_budget_rows,
+        fieldnames=[
+            "id",
+            "bucket",
+            "budget",
+            "selected_word_indices",
+            "comprehensiveness",
+            "sufficiency_error",
+            "log_odds",
+        ],
+    )
+    metadata = _metadata(args, config, topk, len(per_edges))
+    write_json(run_dir / "metadata.json", metadata)
     strengths = [row["interaction_strength"] for row in valid_examples]
     errors = [row["faithfulness_error"] for row in valid_examples]
     write_json(run_dir / "correlations.json", correlation_report(strengths, errors))
     high = [row["faithfulness_error"] for row in valid_examples if row.get("bucket") == "high"]
     low = [row["faithfulness_error"] for row in valid_examples if row.get("bucket") == "low"]
-    write_json(run_dir / "summary.json", {
-        "num_examples": len(per_examples),
-        "num_valid_examples": len(valid_examples),
-        "num_edges": len(per_edges),
-        "high_vs_low": {
-            "cliffs_delta": cliffs_delta(high, low),
-            "standardized_mean_difference": standardized_mean_difference(high, low),
-        },
-    })
+    high_vs_low = {
+        "cliffs_delta": cliffs_delta(high, low),
+        "standardized_mean_difference": standardized_mean_difference(high, low),
+    }
+    ended_at = utc_now_iso()
+    write_diagnostic_outputs(
+        run_dir=run_dir,
+        per_budget_rows=per_budget_rows,
+        per_examples=per_examples,
+        metadata=metadata,
+        high_vs_low=high_vs_low,
+        repo_root=EXPERIMENT_ROOT.parents[1],
+        started_at=started_at,
+        ended_at=ended_at,
+    )
     bucket_rows = summarize_bucket_metrics(valid_examples, ["interaction_strength", "faithfulness_error"])
     with (run_dir / "bucket_metrics.csv").open("w", encoding="utf-8", newline="") as handle:
         fieldnames = sorted({key for row in bucket_rows for key in row.keys()}) if bucket_rows else ["bucket", "n"]
@@ -228,9 +322,23 @@ def build_parser():
     parser.add_argument("--config", default=None)
     parser.add_argument("--output-dir", default=None)
     parser.add_argument("--max-samples", type=int, default=2)
+    parser.add_argument("--adapter", choices=["mock", "baseline"], default="mock")
+    parser.add_argument("--baseline-root", default=str(EXPERIMENT_ROOT.parents[1] / "baselines" / "aml-main_copy"))
+    parser.add_argument("--task", default="sst2")
+    parser.add_argument("--explained-model-backbone", default="ROBERTA")
+    parser.add_argument("--interpreter-model-backbone", default="ROBERTA")
+    parser.add_argument("--metric", default="AOPC_COMPREHENSIVENESS")
+    parser.add_argument("--interpreter-checkpoint", default=None)
+    parser.add_argument("--explained-model-name-or-path", default=None)
+    parser.add_argument("--interpreter-model-name-or-path", default=None)
+    parser.add_argument("--explained-tokenizer-name-or-path", default=None)
+    parser.add_argument("--interpreter-tokenizer-name-or-path", default=None)
+    parser.add_argument("--llm-adapter-path", default=None)
+    parser.add_argument("--local-files-only", action="store_true", default=False)
+    parser.add_argument("--trust-remote-code", action="store_true", default=False)
     parser.add_argument("--disable-dependency", action="store_true", default=False)
     parser.add_argument("--spacy-model", default="en_core_web_sm")
-    parser.add_argument("--interaction-topk", type=int, default=3)
+    parser.add_argument("--interaction-topk", type=int, default=None)
     return parser
 
 

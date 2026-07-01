@@ -1,4 +1,5 @@
-from typing import Callable, Dict, Iterable, List, Sequence, Tuple
+import math
+from typing import Callable, Dict, Iterable, List, Optional, Sequence
 
 
 DEFAULT_BUDGETS = [1, 5, 10, 20, 50]
@@ -12,6 +13,11 @@ def comprehensiveness_score(original_score: float, masked_score: float) -> float
 def sufficiency_error(original_score: float, kept_score: float) -> float:
     """Probability drop when keeping only top-attribution units; smaller is better."""
     return round(float(original_score) - float(kept_score), 12)
+
+
+def log_odds_score(original_score: float, replaced_score: float, eps: float = 1e-12) -> float:
+    """AML EVAL_LOG_ODDS direction: log(prob_perturbed) - log(prob_original)."""
+    return round(math.log(max(float(replaced_score), eps)) - math.log(max(float(original_score), eps)), 12)
 
 
 def aopc(step_scores: Sequence[float]) -> float:
@@ -32,11 +38,13 @@ def evaluate_faithfulness_from_scores(
     word_attributions: Sequence[float],
     delete_scorer: Callable[[Iterable[int]], float],
     keep_scorer: Callable[[Iterable[int]], float],
+    replace_scorer: Optional[Callable[[Iterable[int]], float]] = None,
     budgets: Sequence[int] = DEFAULT_BUDGETS,
 ) -> Dict[str, object]:
-    """Evaluate word-level comprehensiveness, sufficiency error, and AOPC curves."""
+    """Evaluate word-level comprehensiveness, sufficiency error, log-odds, and AOPC curves."""
     comprehensiveness_steps = []
     sufficiency_steps = []
+    log_odds_steps = []
     per_budget = []
     for budget in budgets:
         selected = topk_word_indices(word_attributions, budget)
@@ -45,17 +53,21 @@ def evaluate_faithfulness_from_scores(
             kept_score = keep_scorer(selected)
             comp = comprehensiveness_score(original_score, masked_score)
             suff = sufficiency_error(original_score, kept_score)
+            lo = log_odds_score(original_score, replace_scorer(selected)) if replace_scorer else 0.0
         else:
             comp = 0.0
             suff = 0.0
+            lo = 0.0
         comprehensiveness_steps.append(comp)
         sufficiency_steps.append(suff)
+        log_odds_steps.append(lo)
         per_budget.append(
             {
                 "budget": budget,
                 "selected_word_indices": selected,
                 "comprehensiveness": comp,
                 "sufficiency_error": suff,
+                "log_odds": lo,
             }
         )
     return {
@@ -63,5 +75,6 @@ def evaluate_faithfulness_from_scores(
         "per_budget": per_budget,
         "comprehensiveness_aopc": aopc(comprehensiveness_steps),
         "sufficiency_aopc": aopc(sufficiency_steps),
+        "log_odds_aopc": aopc(log_odds_steps),
         "faithfulness_error": aopc(sufficiency_steps) - aopc(comprehensiveness_steps),
     }

@@ -12,6 +12,7 @@ from models.aml_model_fine_tune import \
     AmlModelFineTune
 from models.train_models_utils import (load_interpreter_model, init_trainable_embeddings, load_trainable_embeddings,
                                        get_explained_ref_token_name)
+from utils.result_summary import utc_now_iso, write_summary_from_results
 from utils.utils_functions import get_device
 
 
@@ -36,6 +37,7 @@ class InferencePretrain:
     def run(self):
 
         begin = time.time()
+        started_at = utc_now_iso()
         ExpArgs.scheduler_type = ExpArgs.fine_tune_scheduler_type
 
         interpreter_model = load_interpreter_model()
@@ -76,6 +78,8 @@ class InferencePretrain:
 
         del aml_model
 
+        ended_at = utc_now_iso()
+        write_summary_from_results(inference__results_path, self.experiment_name, started_at, ended_at)
         save_running_time(end, begin, self.experiment_name, file_type = "FineTune")
 
     def freeze_model(self, _model):
