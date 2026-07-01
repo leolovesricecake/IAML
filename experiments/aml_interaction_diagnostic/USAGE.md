@@ -97,34 +97,6 @@ COMPREHENSIVENESS_SUFFICIENCY
 
 只指定模型路径时，tokenizer 默认回退到同一个模型路径；如果 tokenizer 单独存放，再显式传 tokenizer 参数。
 
-使用默认 Hugging Face 配置：
-
-```bash
-CUDA_VISIBLE_DEVICES=0 python baselines/aml-main_copy/runs/run.py \
-  sst2 BERT BERT AOPC_COMPREHENSIVENESS
-```
-
-指定本地 encoder-only 模型：
-
-```bash
-CUDA_VISIBLE_DEVICES=0 python baselines/aml-main_copy/runs/run.py \
-  sst2 ROBERTA ROBERTA AOPC_COMPREHENSIVENESS \
-  --explained-model-name-or-path /models/roberta-sst2 \
-  --interpreter-model-name-or-path /models/roberta-base \
-  --local-files-only
-```
-
-模型和 tokenizer 分开指定：
-
-```bash
-CUDA_VISIBLE_DEVICES=0 python baselines/aml-main_copy/runs/run.py \
-  imdb BERT ROBERTA COMPREHENSIVENESS \
-  --explained-model-name-or-path /models/bert-imdb-classifier \
-  --explained-tokenizer-name-or-path /tokenizers/bert-imdb-tokenizer \
-  --interpreter-model-name-or-path /models/roberta-base \
-  --interpreter-tokenizer-name-or-path /tokenizers/roberta-base \
-  --local-files-only
-```
 
 LLM explained model 加 LoRA adapter，interpreter 仍使用 encoder-only backbone：
 
@@ -142,8 +114,8 @@ CUDA_VISIBLE_DEVICES=0 python baselines/aml-main_copy/runs/run.py \
 ```bash
 CUDA_VISIBLE_DEVICES=0 python baselines/aml-main_copy/runs/run.py \
   sst2 CAUSAL_LM ROBERTA AOPC_COMPREHENSIVENESS \
-  --explained-model-name-or-path /models/Qwen2.5-7B-Instruct \
-  --interpreter-model-name-or-path /models/roberta-base \
+  --explained-model-name-or-path /mnt/huawei/nsq/models/Qwen/Qwen2.5-7B-Instruct \
+   --interpreter-model-name-or-path /mnt/huawei/nsq/models/FacebookAI/roberta-base \
   --local-files-only
 ```
 
@@ -168,33 +140,6 @@ CUDA_VISIBLE_DEVICES=0 python baselines/aml-main_copy/runs/run.py \
   --local-files-only
 ```
 
-## 4. Qwen/DeepSeek 和 Backbone 兼容性
-
-这个命令现在会被提前拒绝：
-
-```bash
-CUDA_VISIBLE_DEVICES=0 python baselines/aml-main_copy/runs/run.py \
-  sst2 ROBERTA LLAMA AOPC_COMPREHENSIVENESS
-```
-
-原因是 `LLAMA` 不能作为 AML interpreter backbone。当前 interpreter model 只有 `BERT/ROBERTA/DISTILBERT` 三套实现。
-
-下面这种写法也不能正确加载真正的 Qwen/DeepSeek 模型：
-
-```bash
-CUDA_VISIBLE_DEVICES=0 python baselines/aml-main_copy/runs/run.py \
-  sst2 ROBERTA ROBERTA AOPC_COMPREHENSIVENESS \
-  --explained-model-name-or-path /models/Qwen2.5-7B
-```
-
-原因是 `explained_backbone=ROBERTA` 时，代码会调用 `RobertaForSequenceClassification.from_pretrained(...)` 和 `RobertaTokenizer.from_pretrained(...)`。真正的 Qwen/DeepSeek checkpoint 不是 RoBERTa 架构，因此不会正确工作。
-
-当前结论：
-
-- Qwen/DeepSeek 不能仅靠 `--explained-model-name-or-path` 接到 `ROBERTA` backbone 下。
-- CausalLM 类 explained model 统一使用 `CAUSAL_LM`，底层通过 Hugging Face `AutoModelForCausalLM` 和 `AutoTokenizer` 加载。
-- `CAUSAL_LM` 使用 AML 原有的 LLM verbalizer 协议：task prompt + input + label prompt，取最后位置 logits 上的 label token probability。
-- interpreter 仍选 `BERT/ROBERTA/DISTILBERT`，因为 AML interpreter 是自定义 token attribution model，不是普通 explained LLM。
 
 ## 5. 输出目录如何区分模型
 
@@ -217,15 +162,6 @@ PRETRAIN_sst_CAUSAL_LM_ROBERTA_AOPC_COMPREHENSIVENESS_explained-Qwen2.5-7B-Instr
 
 ## 6. Interaction Diagnostic 命令格式
 
-CPU smoke test，不依赖真实 AML checkpoint：
-
-```bash
-python experiments/aml_interaction_diagnostic/scripts/run_diagnostic.py \
-  --max-samples 2 \
-  --disable-dependency \
-  --output-dir experiments/aml_interaction_diagnostic/outputs/smoke_run
-```
-
 指定配置文件、输出目录和样本数：
 
 ```bash
@@ -242,8 +178,8 @@ CUDA_VISIBLE_DEVICES=0 python experiments/aml_interaction_diagnostic/scripts/run
 CUDA_VISIBLE_DEVICES=0 python experiments/aml_interaction_diagnostic/scripts/run_diagnostic.py \
   --config experiments/aml_interaction_diagnostic/configs/diagnostic_sst2.yaml \
   --spacy-model en_core_web_sm \
-  --max-samples 100 \
-  --output-dir experiments/aml_interaction_diagnostic/outputs/sst2_spacy
+  --output-dir experiments/aml_interaction_diagnostic/outputs/sst2_spacy \
+  --max-samples 100
 ```
 
 调整 interaction strength 的 top-k：

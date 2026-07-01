@@ -1,7 +1,7 @@
 {
   "score_type": "target_probability",
   "mask_operator": "aml_hard_deletion_eval_protocol",
-  "dependency_parser": null,
+  "dependency_parser": "spacy:en_core_web_sm",
   "word_attribution_aggregation": "mock_or_configured_adapter_output",
   "config": {
     "dataset": "sst2",
@@ -12,7 +12,7 @@
     "spacy_model": "en_core_web_sm",
     "interaction_strength": {
       "primary": "mean_topk_abs",
-      "topk": 3
+      "topk": 5
     },
     "buckets": {
       "method": "quantile"
