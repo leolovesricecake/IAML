@@ -1,0 +1,99 @@
+{
+  "num_examples": 1821,
+  "num_valid_examples": 1821,
+  "num_skipped_examples": 0,
+  "num_edges": 50307,
+  "run": {
+    "started_at": "2026-07-01T05:32:36.452068+00:00",
+    "ended_at": "2026-07-01T06:20:19.454784+00:00",
+    "git_commit": "6b3e567"
+  },
+  "config": {
+    "dataset": "sst2",
+    "split": "test",
+    "score_type": "target_probability",
+    "mask_operator": "aml_hard_deletion_eval_protocol",
+    "dependency_parser": "spacy",
+    "spacy_model": "en_core_web_sm",
+    "interaction_strength": {
+      "primary": "mean_topk_abs",
+      "topk": 3
+    },
+    "buckets": {
+      "method": "quantile"
+    },
+    "budgets": [
+      1,
+      5,
+      10,
+      20,
+      50
+    ]
+  },
+  "metadata": {
+    "adapter": "baseline",
+    "task": "sst2",
+    "score_type": "target_probability",
+    "mask_operator": "aml_hard_deletion_eval_protocol",
+    "log_odds_operator": "aml_ref_token_replacement",
+    "dependency_parser": "spacy:en_core_web_sm",
+    "word_attribution_aggregation": "max_subword_attribution",
+    "interaction_strength": {
+      "primary": "mean_topk_abs",
+      "topk": 3
+    },
+    "explained_model_backbone": "CAUSAL_LM",
+    "interpreter_model_backbone": "ROBERTA",
+    "metric": "AOPC_COMPREHENSIVENESS",
+    "interpreter_checkpoint": "OUT/PRE_TRAIN/CHECKPOINTS/PRETRAIN_sst_CAUSAL_LM_ROBERTA_AOPC_COMPREHENSIVENESS_explained-Qwen2.5-7B-Instruct-roberta-base_1782807946",
+    "explained_model_name_or_path": "/mnt/huawei/nsq/models/Qwen/Qwen2.5-7B-Instruct",
+    "interpreter_model_name_or_path": "/mnt/huawei/nsq/models/FacebookAI/roberta-base",
+    "explained_tokenizer_name_or_path": null,
+    "interpreter_tokenizer_name_or_path": null,
+    "llm_adapter_path": null,
+    "local_files_only": true,
+    "trust_remote_code": true,
+    "num_edges": 50307
+  },
+  "metrics": {
+    "interaction_strength": {
+      "n": 1821,
+      "mean": 0.1830790464203916,
+      "std": 0.2540571765546719,
+      "min": 0.0,
+      "max": 1.5064900716145833
+    },
+    "faithfulness_error": {
+      "n": 1821,
+      "mean": 0.09440960836448668,
+      "std": 0.2046375943454174,
+      "min": -0.539805094401,
+      "max": 0.6644879976906666
+    },
+    "comprehensiveness_aopc": {
+      "n": 1821,
+      "mean": 0.06827305219951577,
+      "std": 0.10997994665700785,
+      "min": -0.208984375,
+      "max": 0.6614888509113334
+    },
+    "sufficiency_aopc": {
+      "n": 1821,
+      "mean": 0.16268266056400224,
+      "std": 0.1895256771988288,
+      "min": -0.3046875,
+      "max": 0.664098103841
+    },
+    "log_odds_aopc": {
+      "n": 1821,
+      "mean": -0.2738933259814278,
+      "std": 0.5512900837447192,
+      "min": -6.516148367772999,
+      "max": 0.35854328956916665
+    }
+  },
+  "high_vs_low": {
+    "cliffs_delta": -0.15611387193342904,
+    "standardized_mean_difference": -0.3034665782597548
+  }
+}

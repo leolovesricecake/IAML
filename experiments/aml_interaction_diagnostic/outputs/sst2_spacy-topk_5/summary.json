@@ -1,9 +1,0 @@
-{
-  "num_examples": 2,
-  "num_valid_examples": 2,
-  "num_edges": 12,
-  "high_vs_low": {
-    "cliffs_delta": 0.0,
-    "standardized_mean_difference": 0.0
-  }
-}

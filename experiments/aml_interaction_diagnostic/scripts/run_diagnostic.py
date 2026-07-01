@@ -321,7 +321,7 @@ def build_parser():
     parser = argparse.ArgumentParser(description="Run AML interaction diagnostic")
     parser.add_argument("--config", default=None)
     parser.add_argument("--output-dir", default=None)
-    parser.add_argument("--max-samples", type=int, default=2)
+    parser.add_argument("--max-samples", type=int, default=None)
     parser.add_argument("--adapter", choices=["mock", "baseline"], default="mock")
     parser.add_argument("--baseline-root", default=str(EXPERIMENT_ROOT.parents[1] / "baselines" / "aml-main_copy"))
     parser.add_argument("--task", default="sst2")
