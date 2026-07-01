@@ -25,6 +25,6 @@ For detailed usage, including model paths, datasets, output directories, and GPU
 python experiments/aml_interaction_diagnostic/scripts/run_candidate_coverage.py --max-words 20 --num-samples 2
 ```
 
-## Full Integration Note
+## Full Integration
 
-`src/aml_adapter.py` contains the adapter boundary for the official AML implementation. A trained AML checkpoint should be exposed through the same `AttributionOutput` contract before running full datasets.
+Use `run_diagnostic.py --adapter baseline` with a pAML checkpoint from `OUT/PRE_TRAIN/CHECKPOINTS/<experiment>` to run the real AML diagnostic. See `USAGE.md` for model paths, datasets, output directories, GPU selection, and result interpretation.

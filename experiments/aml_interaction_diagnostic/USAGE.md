@@ -1,25 +1,27 @@
 # AML Interaction Diagnostic 使用说明
 
-本文档只写 Linux 风格命令。主要入口有两个：
+本文只写 Linux 风格命令。当前开发环境虽然是 Windows，但最终运行时请按 Linux 命令执行。
 
-1. `baselines/aml-main_copy/runs/run.py`：运行 AML baseline，支持从命令行指定 explained/interpreter 模型、tokenizer、LoRA adapter。
-2. `experiments/aml_interaction_diagnostic/scripts/run_diagnostic.py`：运行 interaction diagnostic，输出 per-example、per-edge、bucket、correlation 和 casebook。
+本项目有两个主要入口：
 
-## 1. 环境、依赖和显卡号
+- `baselines/aml-main_copy/runs/run.py`：运行 AML baseline，包括 pAML pretrain、pAML inference，代码中 fAML 入口仍保留但默认未启用。
+- `experiments/aml_interaction_diagnostic/scripts/run_diagnostic.py`：运行 interaction diagnostic，用来回答“AML 是否在具有高局部二阶 interaction 的样本上表现出更差的 attribution faithfulness”。
 
-选择单张显卡：
+## 1. 环境与显卡
+
+选择第 0 张 GPU：
 
 ```bash
 CUDA_VISIBLE_DEVICES=0 python ...
 ```
 
-选择第 2 张物理显卡：
+选择第 1 张 GPU：
 
 ```bash
 CUDA_VISIBLE_DEVICES=1 python ...
 ```
 
-在进程内部，被选中的第一张可见显卡会显示为 `cuda:0`，这是 CUDA 的正常行为。
+注意：进程内部看到的第一张可见 GPU 会显示为 `cuda:0`，这是 CUDA 的正常行为。
 
 安装 diagnostic 依赖：
 
@@ -28,9 +30,29 @@ pip install -r experiments/aml_interaction_diagnostic/requirements_diagnostic.tx
 python -m spacy download en_core_web_sm
 ```
 
-如果只是跑 adjacent-only smoke test，可以不安装 spaCy 模型，并在命令里加 `--disable-dependency`。
+如果只跑 adjacent-only 或 smoke test，可以不安装 spaCy 模型，并传入：
 
-## 2. AML Baseline 命令格式
+```bash
+--disable-dependency
+```
+
+## 2. 先跑一个 Mock Smoke Test
+
+这个命令不需要 AML checkpoint，也不需要真实模型权重，只验证 diagnostic 管线和输出文件是否正常：
+
+```bash
+python experiments/aml_interaction_diagnostic/scripts/run_diagnostic.py \
+  --adapter mock \
+  --max-samples 2 \
+  --disable-dependency \
+  --output-dir experiments/aml_interaction_diagnostic/outputs/smoke_mock
+```
+
+mock 输出只能用于检查管线，不能用于论文结论。
+
+## 3. 运行 AML Baseline
+
+基本格式：
 
 ```bash
 CUDA_VISIBLE_DEVICES=0 python baselines/aml-main_copy/runs/run.py \
@@ -59,7 +81,7 @@ MISTRAL
 CAUSAL_LM
 ```
 
-`qwen`、`qwen2`、`qwen3`、`deepseek`、`deepseek_v2`、`deepseek_v3` 可以作为 explained backbone 的命令行别名使用，内部会归一到 `CAUSAL_LM`。推荐直接写 `CAUSAL_LM`，因为 AML 侧关心的是 CausalLM verbalizer 打分协议，而不是模型家族名。
+`qwen`、`qwen2`、`qwen3`、`deepseek`、`deepseek_v2`、`deepseek_v3` 可以作为 explained backbone 的命令行别名使用，内部会归一到 `CAUSAL_LM`。
 
 `interpreter_backbone` 目前只支持：
 
@@ -81,9 +103,7 @@ AOPC_COMPREHENSIVENESS_AOPC_SUFFICIENCY
 COMPREHENSIVENESS_SUFFICIENCY
 ```
 
-## 3. 指定模型、Tokenizer 和 Adapter
-
-可用参数：
+可选模型参数：
 
 ```text
 --explained-model-name-or-path
@@ -95,55 +115,69 @@ COMPREHENSIVENESS_SUFFICIENCY
 --trust-remote-code
 ```
 
-只指定模型路径时，tokenizer 默认回退到同一个模型路径；如果 tokenizer 单独存放，再显式传 tokenizer 参数。
+如果只指定模型路径，tokenizer 默认回退到对应模型路径；如果 tokenizer 单独存放，再显式传 tokenizer 参数。
 
-
-LLM explained model 加 LoRA adapter，interpreter 仍使用 encoder-only backbone：
+## 4. Baseline 示例：RoBERTa explained + RoBERTa interpreter
 
 ```bash
 CUDA_VISIBLE_DEVICES=0 python baselines/aml-main_copy/runs/run.py \
-  emotions LLAMA ROBERTA SUFFICIENCY \
-  --explained-model-name-or-path /models/Llama-2-7b-hf \
-  --llm-adapter-path /models/llama-emotion-lora \
+  sst2 ROBERTA ROBERTA AOPC_COMPREHENSIVENESS \
+  --explained-model-name-or-path /models/roberta-sst2 \
   --interpreter-model-name-or-path /models/roberta-base \
   --local-files-only
 ```
 
-通用 CausalLM explained model，例如 Qwen：
+## 5. Baseline 示例：Qwen / DeepSeek / Llama explained model
+
+如果 explained model 是 Qwen、DeepSeek、Llama、Mistral 等 decoder-only CausalLM，推荐统一使用 `CAUSAL_LM`：
 
 ```bash
 CUDA_VISIBLE_DEVICES=0 python baselines/aml-main_copy/runs/run.py \
   sst2 CAUSAL_LM ROBERTA AOPC_COMPREHENSIVENESS \
-  --explained-model-name-or-path /mnt/huawei/nsq/models/Qwen/Qwen2.5-7B-Instruct \
-   --interpreter-model-name-or-path /mnt/huawei/nsq/models/FacebookAI/roberta-base \
-  --local-files-only
+  --explained-model-name-or-path /models/Qwen2.5-7B-Instruct \
+  --interpreter-model-name-or-path /models/roberta-base \
+  --local-files-only \
+  --trust-remote-code
 ```
 
-等价的 Qwen alias 写法：
+也可以使用 alias：
 
 ```bash
 CUDA_VISIBLE_DEVICES=0 python baselines/aml-main_copy/runs/run.py \
   sst2 qwen ROBERTA AOPC_COMPREHENSIVENESS \
   --explained-model-name-or-path /models/Qwen2.5-7B-Instruct \
   --interpreter-model-name-or-path /models/roberta-base \
-  --local-files-only
+  --local-files-only \
+  --trust-remote-code
 ```
 
-DeepSeek 或需要远程自定义代码的模型：
+DeepSeek 示例：
 
 ```bash
 CUDA_VISIBLE_DEVICES=0 python baselines/aml-main_copy/runs/run.py \
   imdb deepseek ROBERTA AOPC_COMPREHENSIVENESS \
   --explained-model-name-or-path /models/deepseek-llm-7b \
   --interpreter-model-name-or-path /models/roberta-base \
-  --trust-remote-code \
-  --local-files-only
+  --local-files-only \
+  --trust-remote-code
 ```
 
+不要这样写：
 
-## 5. 输出目录如何区分模型
+```bash
+python baselines/aml-main_copy/runs/run.py sst2 ROBERTA LLAMA AOPC_COMPREHENSIVENESS \
+  --explained-model-name-or-path /models/Qwen2.5-7B-Instruct
+```
 
-baseline 的输出根目录仍来自 `ExpArgs.default_root_dir`，默认写到 AML 的 `OUT` 目录结构下：
+原因：
+
+- `explained_backbone=ROBERTA` 会走 `RobertaForSequenceClassification`，不能正确加载 Qwen。
+- `interpreter_backbone=LLAMA` 不支持；AML interpreter 目前只实现了 `BERT/ROBERTA/DISTILBERT`。
+- Qwen/DeepSeek/Llama/Mistral 这类模型应该放在 explained side，写成 `CAUSAL_LM` 或 alias；interpreter side 仍用 encoder-only attribution model。
+
+## 6. Baseline 输出目录
+
+baseline 输出根目录来自 AML 的 `ExpArgs.default_root_dir`，默认是 `OUT` 结构：
 
 ```text
 OUT/CONFIG
@@ -152,64 +186,127 @@ OUT/INFERENCE_PRETRAIN
 OUT/FINE_TUNE
 ```
 
-本次已修改实验名前缀。只要传了模型 override，`HP/PRETRAIN/INFERENCE_PRETRAIN/FINE_TUNE` 的实验名都会带上 explained/interpreter 模型路径摘要：
+实验名会包含 task、backbone、metric，以及模型 override 的 basename 和路径 hash。例如：
 
 ```text
 PRETRAIN_sst_CAUSAL_LM_ROBERTA_AOPC_COMPREHENSIVENESS_explained-Qwen2.5-7B-Instruct-<hash>_interpreter-roberta-base-<hash>_<timestamp>
 ```
 
-摘要由路径 basename 和完整路径 hash 组成。因此不同的 `--explained-model-name-or-path` 或 `--interpreter-model-name-or-path` 会落到不同结果目录里。
+因此不同的 `--explained-model-name-or-path` 或 `--interpreter-model-name-or-path` 会进入不同结果目录。
 
-## 6. Interaction Diagnostic 命令格式
-
-指定配置文件、输出目录和样本数：
-
-```bash
-CUDA_VISIBLE_DEVICES=0 python experiments/aml_interaction_diagnostic/scripts/run_diagnostic.py \
-  --config experiments/aml_interaction_diagnostic/configs/diagnostic_sst2.yaml \
-  --max-samples 100 \
-  --output-dir experiments/aml_interaction_diagnostic/outputs/sst2_run \
-  --disable-dependency
-```
-
-启用 spaCy dependency edges：
-
-```bash
-CUDA_VISIBLE_DEVICES=0 python experiments/aml_interaction_diagnostic/scripts/run_diagnostic.py \
-  --config experiments/aml_interaction_diagnostic/configs/diagnostic_sst2.yaml \
-  --spacy-model en_core_web_sm \
-  --output-dir experiments/aml_interaction_diagnostic/outputs/sst2_spacy \
-  --max-samples 100
-```
-
-调整 interaction strength 的 top-k：
-
-```bash
-CUDA_VISIBLE_DEVICES=0 python experiments/aml_interaction_diagnostic/scripts/run_diagnostic.py \
-  --config experiments/aml_interaction_diagnostic/configs/diagnostic_sst2.yaml \
-  --interaction-topk 5 \
-  --max-samples 100 \
-  --output-dir experiments/aml_interaction_diagnostic/outputs/sst2_top5 \
-  --disable-dependency
-```
-
-配置文件示例：
+`INFERENCE_PRETRAIN/RESULTS_DF/<experiment>/` 和 `FINE_TUNE/RESULTS_DF/<experiment>/` 会保存：
 
 ```text
-experiments/aml_interaction_diagnostic/configs/diagnostic_sst2.yaml
-experiments/aml_interaction_diagnostic/configs/diagnostic_imdb.yaml
-experiments/aml_interaction_diagnostic/configs/diagnostic_eraser_movie_reviews.yaml
+results.csv
+summary.json
+aopc_curve.csv
 ```
 
-## 7. Diagnostic 输出文件
+其中：
 
-一个 run 目录下会生成：
+- `results.csv`：每个样本的 metric 结果。
+- `summary.json`：配置、模型、指标聚合、时间、git commit 等 run-level 汇总。
+- `aopc_curve.csv`：按 budget 聚合的曲线数据，可直接用于画 AOPC 曲线。
+
+## 7. 真实 Interaction Diagnostic：使用 pAML Checkpoint
+
+真实 diagnostic 使用 `--adapter baseline`，需要一个已有 pAML checkpoint，也就是 baseline pretrain 产物：
+
+```text
+OUT/PRE_TRAIN/CHECKPOINTS/<pretrain_experiment>
+```
+
+它不依赖 fAML per-sample checkpoint。
+
+RoBERTa explained 示例：
+
+```bash
+CUDA_VISIBLE_DEVICES=0 python experiments/aml_interaction_diagnostic/scripts/run_diagnostic.py \
+  --adapter baseline \
+  --baseline-root baselines/aml-main_copy \
+  --task sst2 \
+  --explained-model-backbone ROBERTA \
+  --interpreter-model-backbone ROBERTA \
+  --metric AOPC_COMPREHENSIVENESS \
+  --interpreter-checkpoint OUT/PRE_TRAIN/CHECKPOINTS/<pretrain_experiment> \
+  --explained-model-name-or-path /models/roberta-sst2 \
+  --interpreter-model-name-or-path /models/roberta-base \
+  --max-samples 100 \
+  --spacy-model en_core_web_sm \
+  --output-dir experiments/aml_interaction_diagnostic/outputs/sst2_real_roberta_topk3
+```
+
+Qwen explained 示例：
+
+```bash
+CUDA_VISIBLE_DEVICES=0 python experiments/aml_interaction_diagnostic/scripts/run_diagnostic.py \
+  --adapter baseline \
+  --baseline-root baselines/aml-main_copy \
+  --task sst2 \
+  --explained-model-backbone CAUSAL_LM \
+  --interpreter-model-backbone ROBERTA \
+  --metric AOPC_COMPREHENSIVENESS \
+  --interpreter-checkpoint OUT/PRE_TRAIN/CHECKPOINTS/<pretrain_experiment> \
+  --explained-model-name-or-path /models/Qwen2.5-7B-Instruct \
+  --interpreter-model-name-or-path /models/roberta-base \
+  --local-files-only \
+  --trust-remote-code \
+  --max-samples 100 \
+  --disable-dependency \
+  --output-dir experiments/aml_interaction_diagnostic/outputs/sst2_real_qwen_topk3
+```
+
+如果 dependency parser 可用，把 `--disable-dependency` 去掉并指定：
+
+```bash
+--spacy-model en_core_web_sm
+```
+
+## 8. Diagnostic 配置与 Top-k
+
+可以通过 YAML 指定默认配置：
+
+```bash
+CUDA_VISIBLE_DEVICES=0 python experiments/aml_interaction_diagnostic/scripts/run_diagnostic.py \
+  --adapter baseline \
+  --config experiments/aml_interaction_diagnostic/configs/diagnostic_sst2.yaml \
+  --interpreter-checkpoint OUT/PRE_TRAIN/CHECKPOINTS/<pretrain_experiment> \
+  --output-dir experiments/aml_interaction_diagnostic/outputs/sst2_real_from_yaml
+```
+
+`interaction_strength.topk` 会从 YAML 生效。命令行可以覆盖：
+
+```bash
+--interaction-topk 5
+```
+
+例如：
+
+```bash
+CUDA_VISIBLE_DEVICES=0 python experiments/aml_interaction_diagnostic/scripts/run_diagnostic.py \
+  --adapter baseline \
+  --task sst2 \
+  --explained-model-backbone ROBERTA \
+  --interpreter-model-backbone ROBERTA \
+  --metric AOPC_COMPREHENSIVENESS \
+  --interpreter-checkpoint OUT/PRE_TRAIN/CHECKPOINTS/<pretrain_experiment> \
+  --interaction-topk 5 \
+  --max-samples 100 \
+  --disable-dependency \
+  --output-dir experiments/aml_interaction_diagnostic/outputs/sst2_real_topk5
+```
+
+## 9. Diagnostic 输出文件
+
+一个 diagnostic run 目录会包含：
 
 ```text
 metadata.json
+summary.json
 per_example.jsonl
 per_edge.jsonl
-summary.json
+per_budget_metrics.csv
+aopc_curve.csv
 bucket_metrics.csv
 correlations.json
 candidate_coverage.json
@@ -219,13 +316,49 @@ casebook.md
 
 主要阅读顺序：
 
-1. `summary.json`：run 级别摘要。
-2. `correlations.json`：interaction strength 和 faithfulness error 的相关性。
-3. `bucket_metrics.csv`：low/medium/high interaction 桶之间的差异。
-4. `per_example.jsonl`：逐样本 attribution、interaction、faithfulness。
-5. `casebook.md`：高 interaction、低 interaction、best/worst faithfulness 案例。
+1. `summary.json`：run-level 汇总，包括配置、模型、checkpoint、指标均值、时间、git commit。
+2. `correlations.json`：interaction strength 和 faithfulness error 的 Pearson/Spearman 相关性。
+3. `bucket_metrics.csv`：low/medium/high interaction 桶之间的平均差异。
+4. `per_budget_metrics.csv`：每个样本、每个 budget 的 comprehensiveness、sufficiency error、log-odds。
+5. `aopc_curve.csv`：按 budget 聚合后的曲线数据，论文画 AOPC 曲线主要用这个文件。
+6. `per_example.jsonl`：逐样本 attribution、interaction、faithfulness 详情。
+7. `per_edge.jsonl`：每条候选边的二阶 finite-difference interaction。
+8. `casebook.md`：高/低 interaction、best/worst faithfulness 案例。
 
-## 8. Candidate Coverage 和结果重算
+## 10. 指标方向与论文结论怎么读
+
+diagnostic 的主协议与 AML official evaluation 对齐：
+
+- interaction teacher score：target class probability。
+- comprehensiveness：hard deletion 后 target probability drop，越大表示 attribution 越能删掉关键内容。
+- sufficiency error：只保留 top attribution words 后的 target probability drop，越小越好。
+- log-odds：使用 AML 的 ref-token replacement 语义，单独作为 LO 曲线输出。
+- AOPC：把多个 budget 下的 step 值聚合，`aopc_curve.csv` 保存的是画曲线用的 per-budget 聚合。
+
+回答研究问题时，请只使用 `--adapter baseline` 的真实结果，不要使用 mock 结果。
+
+核心判断路径：
+
+- 看 `correlations.json`：如果 interaction strength 与 faithfulness error 显著正相关，说明高 interaction 样本上 attribution 更差。
+- 看 `bucket_metrics.csv`：比较 high interaction 桶和 low interaction 桶的 `faithfulness_error`、`comprehensiveness_aopc`、`sufficiency_aopc`。
+- 看 `summary.json` 的 `high_vs_low`：包括 Cliff's delta 和 standardized mean difference。
+- 看 `casebook.md`：人工检查高 interaction 且 faithfulness 差的典型样本。
+
+## 11. 结果重算与 Casebook
+
+重新生成 casebook：
+
+```bash
+python experiments/aml_interaction_diagnostic/scripts/generate_casebook.py \
+  --run-dir experiments/aml_interaction_diagnostic/outputs/sst2_real_topk3
+```
+
+已有 run 目录重新聚合：
+
+```bash
+python experiments/aml_interaction_diagnostic/scripts/aggregate_results.py \
+  --run-dir experiments/aml_interaction_diagnostic/outputs/sst2_real_topk3
+```
 
 短文本 all-pairs coverage：
 
@@ -237,57 +370,47 @@ python experiments/aml_interaction_diagnostic/scripts/run_candidate_coverage.py 
   --output-dir experiments/aml_interaction_diagnostic/outputs/sst2_coverage
 ```
 
-已有 run 目录重新生成 casebook：
+## 12. 常见问题
 
-```bash
-python experiments/aml_interaction_diagnostic/scripts/generate_casebook.py \
-  --run-dir experiments/aml_interaction_diagnostic/outputs/smoke_run
-```
+### run_diagnostic.py 是否依赖 AML finetune 阶段产物？
 
-已有 run 目录重新聚合结果：
-
-```bash
-python experiments/aml_interaction_diagnostic/scripts/aggregate_results.py \
-  --run-dir experiments/aml_interaction_diagnostic/outputs/smoke_run
-```
-
-## 9. Baseline 数据流和 Device 检查结论
-
-baseline 主数据流：
+不依赖。真实 diagnostic 默认加载 pAML checkpoint：
 
 ```text
-run.py
-  -> load_explained_model()
-  -> HpSearch
-  -> PreTrain
-  -> InferencePretrain
-  -> FineTune
+OUT/PRE_TRAIN/CHECKPOINTS/<pretrain_experiment>
 ```
 
-训练和评估中的关键张量路径：
+### 可以把 `explained_backbone=ROBERTA` 但模型路径指向 Qwen 吗？
+
+不可以。这样会用 RoBERTa 类加载 Qwen 权重，架构不匹配。Qwen/DeepSeek/Llama/Mistral 应使用：
 
 ```text
-DataModule
-  -> tokenize / collate_fn / padding / optional prompt
-  -> AmlModel.forward()
-  -> interpreter attribution
-  -> explained-side token attribution
-  -> soft embedding blend training loss
-  -> hard deletion evaluation metrics
+explained_backbone=CAUSAL_LM
+interpreter_backbone=ROBERTA/BERT/DISTILBERT
 ```
 
-本次已检查并修掉的 device 风险：
+### `--local-files-only` 什么时候用？
 
-- `evaluations/metrics/metrics_utils.py`：evaluation hard deletion 后的输入统一 `.to(get_device())`，不再硬编码 `.cuda()`。
-- `models/train_models_utils.py`：BERT/RoBERTa/DistilBERT explained model 加载后用 `model.to(get_device())`，不再直接 `.cuda()`。
-- `models/aml_model.py`：临时 tensor、swap index tensor 使用 `self.device` 或 `input_tensor.device`。
-- `utils/utils_functions.py`：prompt merge 输出移动到 `get_device()`，不再硬编码 CUDA。
-- `utils/utils_functions.py`：LLM prompt 模式下的 `label_vocab_tokens` 索引移动到 `logits.device`。
-- `evaluations/metrics/metrics_utils.py`：special-token 判断中的 token id tensor 移动到 `input_ids.device`。
-- 新增单测会扫描关键运行文件，防止 `.cuda()` 再进入这些路径。
+当模型、tokenizer、checkpoint 都已经在本地时使用，避免 Hugging Face 联网下载：
 
-当前仍需注意：
+```bash
+--local-files-only
+```
 
-- LLM 路径仍使用 Hugging Face `device_map="auto"`；建议用 `CUDA_VISIBLE_DEVICES=<id>` 限制可见显卡，先按单卡运行验证。
-- 当前 diagnostic 的 smoke path 使用 mock adapter；真实 AML checkpoint 接入点在 `experiments/aml_interaction_diagnostic/src/aml_adapter.py`。
-- Qwen/DeepSeek/Llama/Mistral 等 CausalLM explained model 推荐统一走 `CAUSAL_LM`；只有 interpreter backbone 仍需限定在 `BERT/ROBERTA/DISTILBERT`。
+### 什么时候需要 `--trust-remote-code`？
+
+Qwen、DeepSeek 或其他 Hugging Face repo 需要自定义模型代码时使用：
+
+```bash
+--trust-remote-code
+```
+
+### spaCy 没装怎么办？
+
+先用：
+
+```bash
+--disable-dependency
+```
+
+这会跑 adjacent-only candidate graph；装好 `en_core_web_sm` 后再启用 dependency edges。
