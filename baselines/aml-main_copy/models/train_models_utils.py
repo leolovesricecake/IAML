@@ -190,9 +190,19 @@ def construct_word_embedding(model, model_backbone: ModelBackboneTypes, input_id
     if is_model_encoder_only(model_backbone):
         backbone_name = BackbonesMetaData.name[model_backbone]
         model = getattr(model, backbone_name)
-        return model.embeddings.word_embeddings(input_ids)
+        embedding_module = model.embeddings.word_embeddings
     else:
-        return model.get_input_embeddings()(input_ids)
+        embedding_module = model.get_input_embeddings()
+    input_ids = input_ids.to(_module_first_device(embedding_module))
+    return embedding_module(input_ids)
+
+
+def _module_first_device(module):
+    for param in module.parameters(recurse = True):
+        return param.device
+    for buffer in module.buffers(recurse = True):
+        return buffer.device
+    return torch.device(get_device())
 
 
 def get_explained_ref_token_name(explained_tokenizer):

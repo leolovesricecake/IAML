@@ -188,8 +188,7 @@ class AmlModel(pl.LightningModule):
                                                                                   epoch = -1, item_index = "",
                                                                                   experiment_path = self.experiment_path)
 
-                end = time.time()
-                duration = end - begin
+            duration = time.time() - begin
 
         return tokens_attribution, evaluation_item, duration
 
@@ -214,9 +213,10 @@ class AmlModel(pl.LightningModule):
     def _remove_special_tokens(self, _input_ids, _tokens_attr, _special_tokens, _special_tokens_indices = None,
                                _replacement_value = 1):
         if _special_tokens_indices is None:
-            _special_tokens_indices = torch.isin(_input_ids, _special_tokens.to(self.device))
-        _tokens_attr[_special_tokens_indices] = _replacement_value
-        return _tokens_attr, _special_tokens_indices
+            _special_tokens_indices = torch.isin(_input_ids, _special_tokens.to(_input_ids.device))
+        token_attr_indices = _special_tokens_indices.to(_tokens_attr.device)
+        _tokens_attr[token_attr_indices] = _replacement_value
+        return _tokens_attr, token_attr_indices
 
     def special_tokens_handler(self, _input_ids, _tokens_attr, _special_tokens, _replacement_value = 1,
                                _is_return_special_tokens_indices = False, _special_tokens_indices = None):
@@ -246,14 +246,15 @@ class AmlModel(pl.LightningModule):
         new_tokens_attr = []
         for batch_idx in range(len(batch[EXPLAINED_INPUT_IDS_NAME])):
             new_tokens_attr_lst = []
+            current_tokens_attr = tokens_attr[batch_idx]
             for indices in batch[MAP_TOKENS][batch_idx]:
                 if -1 in indices: # padding
-                    new_tokens_attr_lst.append(torch.tensor(0, device = self.device))
+                    new_tokens_attr_lst.append(torch.tensor(0, device = current_tokens_attr.device))
                     continue
 
-                scores = tokens_attr[batch_idx][indices]
+                scores = current_tokens_attr[indices]
                 scores = [v for v in scores if not math.isnan(v)]
-                pooled_score = torch.tensor(NAN_FLOAT).to(self.device)
+                pooled_score = torch.tensor(NAN_FLOAT, device = current_tokens_attr.device)
                 if len(scores) > 0:
                     scores = torch.stack(scores)
                     if ExpArgs.cross_tokenizers_pooling == CrossTokenizersPooling.MEAN.value:
@@ -316,9 +317,10 @@ class AmlModel(pl.LightningModule):
             raise ValueError(e)
 
     def get_trainable_embed_vec(self, i):
-        vec = self.trainable_embeddings(torch.tensor(i).to(self.device))
+        embedding_device = self.trainable_embeddings.weight.device
+        vec = self.trainable_embeddings(torch.tensor(i, device = embedding_device))
         if ExpArgs.is_include_general_label_token:
-            label_vec = self.trainable_embeddings(self.label_embedding_index.to(self.device))
+            label_vec = self.trainable_embeddings(self.label_embedding_index.to(embedding_device))
             return vec + label_vec
         return vec
 
@@ -686,4 +688,3 @@ class AmlModel(pl.LightningModule):
         #     print(log_dict)
         #
         #     self.log_dict(log_dict, on_step = True, on_epoch = False)
-

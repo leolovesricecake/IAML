@@ -383,11 +383,13 @@ class BaselineAmlAdapter:
             raise RuntimeError("BaselineAmlAdapter must be constructed with from_checkpoint().")
         batch = self._collate_text(text)
         with self.torch.no_grad():
-            output = self.aml_model.forward(batch)
-            probabilities = self.torch.softmax(output.explained_model_predicted_logits, dim=1)
-            predicted_label = int(output.explained_model_predicted_class.squeeze().item())
-            original_score = float(probabilities[0, predicted_label].item())
-            token_attr = output.tokens_attr[0].detach().cpu().tolist()
+            probabilities, predicted_label = self._predict_batch(batch)
+            original_score = float(probabilities[predicted_label].item())
+            tokens_attribution, _evaluation_item, _duration = self.aml_model.forwad_paml_inference(
+                batch,
+                is_evaluate=False,
+            )
+            token_attr = tokens_attribution.detach().cpu().tolist()
         self._target_label_by_text[text] = predicted_label
         self._original_score_by_text[text] = original_score
         word_attributions = []

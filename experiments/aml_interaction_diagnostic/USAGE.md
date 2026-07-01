@@ -117,15 +117,6 @@ COMPREHENSIVENESS_SUFFICIENCY
 
 如果只指定模型路径，tokenizer 默认回退到对应模型路径；如果 tokenizer 单独存放，再显式传 tokenizer 参数。
 
-## 4. Baseline 示例：RoBERTa explained + RoBERTa interpreter
-
-```bash
-CUDA_VISIBLE_DEVICES=0 python baselines/aml-main_copy/runs/run.py \
-  sst2 ROBERTA ROBERTA AOPC_COMPREHENSIVENESS \
-  --explained-model-name-or-path /models/roberta-sst2 \
-  --interpreter-model-name-or-path /models/roberta-base \
-  --local-files-only
-```
 
 ## 5. Baseline 示例：Qwen / DeepSeek / Llama explained model
 
@@ -161,19 +152,6 @@ CUDA_VISIBLE_DEVICES=0 python baselines/aml-main_copy/runs/run.py \
   --local-files-only \
   --trust-remote-code
 ```
-
-不要这样写：
-
-```bash
-python baselines/aml-main_copy/runs/run.py sst2 ROBERTA LLAMA AOPC_COMPREHENSIVENESS \
-  --explained-model-name-or-path /models/Qwen2.5-7B-Instruct
-```
-
-原因：
-
-- `explained_backbone=ROBERTA` 会走 `RobertaForSequenceClassification`，不能正确加载 Qwen。
-- `interpreter_backbone=LLAMA` 不支持；AML interpreter 目前只实现了 `BERT/ROBERTA/DISTILBERT`。
-- Qwen/DeepSeek/Llama/Mistral 这类模型应该放在 explained side，写成 `CAUSAL_LM` 或 alias；interpreter side 仍用 encoder-only attribution model。
 
 ## 6. Baseline 输出目录
 
@@ -218,49 +196,28 @@ OUT/PRE_TRAIN/CHECKPOINTS/<pretrain_experiment>
 
 它不依赖 fAML per-sample checkpoint。
 
-RoBERTa explained 示例：
-
-```bash
-CUDA_VISIBLE_DEVICES=0 python experiments/aml_interaction_diagnostic/scripts/run_diagnostic.py \
-  --adapter baseline \
-  --baseline-root baselines/aml-main_copy \
-  --task sst2 \
-  --explained-model-backbone ROBERTA \
-  --interpreter-model-backbone ROBERTA \
-  --metric AOPC_COMPREHENSIVENESS \
-  --interpreter-checkpoint OUT/PRE_TRAIN/CHECKPOINTS/<pretrain_experiment> \
-  --explained-model-name-or-path /models/roberta-sst2 \
-  --interpreter-model-name-or-path /models/roberta-base \
-  --max-samples 100 \
-  --spacy-model en_core_web_sm \
-  --output-dir experiments/aml_interaction_diagnostic/outputs/sst2_real_roberta_topk3
-```
-
 Qwen explained 示例：
 
 ```bash
 CUDA_VISIBLE_DEVICES=0 python experiments/aml_interaction_diagnostic/scripts/run_diagnostic.py \
   --adapter baseline \
   --baseline-root baselines/aml-main_copy \
+  --config experiments/aml_interaction_diagnostic/configs/diagnostic_sst2.yaml \
   --task sst2 \
   --explained-model-backbone CAUSAL_LM \
   --interpreter-model-backbone ROBERTA \
   --metric AOPC_COMPREHENSIVENESS \
-  --interpreter-checkpoint OUT/PRE_TRAIN/CHECKPOINTS/<pretrain_experiment> \
-  --explained-model-name-or-path /models/Qwen2.5-7B-Instruct \
-  --interpreter-model-name-or-path /models/roberta-base \
+  --interpreter-checkpoint OUT/PRE_TRAIN/CHECKPOINTS/PRETRAIN_sst_CAUSAL_LM_ROBERTA_AOPC_COMPREHENSIVENESS_explained-Qwen2.5-7B-Instruct-roberta-base_1782807946 \
+  --explained-model-name-or-path /mnt/huawei/nsq/models/Qwen/Qwen2.5-7B-Instruct \
+  --interpreter-model-name-or-path /mnt/huawei/nsq/models/FacebookAI/roberta-base \
   --local-files-only \
   --trust-remote-code \
-  --max-samples 100 \
-  --disable-dependency \
-  --output-dir experiments/aml_interaction_diagnostic/outputs/sst2_real_qwen_topk3
+  --spacy-model en_core_web_sm \
+  --output-dir experiments/aml_interaction_diagnostic/outputs/sst2_real_qwen_topk3 \
+  --max-samples 100
 ```
 
-如果 dependency parser 可用，把 `--disable-dependency` 去掉并指定：
-
-```bash
---spacy-model en_core_web_sm
-```
+如果 dependency parser 可用，把 `--disable-dependency` 去掉
 
 ## 8. Diagnostic 配置与 Top-k
 

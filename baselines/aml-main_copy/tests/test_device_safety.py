@@ -36,6 +36,21 @@ class DeviceSafetyTests(unittest.TestCase):
 
         self.assertIn("self.special_tokens.to(input_ids.device)", source)
 
+    def test_aml_special_tokens_follow_input_device(self):
+        source = (BASELINE_ROOT / "models" / "aml_model.py").read_text(encoding="utf-8")
+
+        self.assertIn("_special_tokens.to(_input_ids.device)", source)
+
+    def test_trainable_label_embedding_indices_follow_embedding_device(self):
+        source = (BASELINE_ROOT / "models" / "aml_model.py").read_text(encoding="utf-8")
+
+        self.assertIn("self.trainable_embeddings.weight.device", source)
+
+    def test_construct_word_embedding_moves_ids_to_embedding_device(self):
+        source = (BASELINE_ROOT / "models" / "train_models_utils.py").read_text(encoding="utf-8")
+
+        self.assertIn("input_ids = input_ids.to(_module_first_device(embedding_module))", source)
+
 
 if __name__ == "__main__":
     unittest.main()
